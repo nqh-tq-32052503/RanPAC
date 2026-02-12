@@ -7,8 +7,13 @@ import sys
 import torch
 
 from utils.data_manager import DataManager
+from utils.dil_data_manager import DILDataManager
 from utils.toolkit import count_parameters
 from RanPAC import Learner
+
+reproduced_datasets_v1 = "seq-cifar10,seq-cropdisease,seq-mnist,seq-resisc45,seq-eurosat-rgb,seq-tinyimg,seq-cifar100,seq-chestx,seq-imagenet-r,seq-cub200"
+reproduced_datasets_v2 = "seq-eurosat-rgb,seq-tinyimg,seq-imagenet-r,seq-cub200,seq-cifar100,seq-mnist,seq-resisc45,seq-chestx,seq-cifar10,seq-cropdisease"
+reproduced_datasets_v3 = "seq-tinyimg,seq-resisc45,seq-cub200,seq-chestx,seq-imagenet-r,seq-eurosat-rgb,seq-mnist,seq-cifar10,seq-cropdisease,seq-cifar100"
 
 def train(args):
     seed_list = copy.deepcopy(args["seed"])
@@ -23,7 +28,7 @@ def train(args):
 
 
 def _train(args):
-
+    is_reproduced_data = False
     init_cls = 0 if args ["init_cls"] == args["increment"] else args["init_cls"]
     logs_name = "logs/{}/{}/{}/{}".format(args["model_name"],args["dataset"], init_cls, args['increment'])
     if not os.path.exists(logs_name):
@@ -69,6 +74,21 @@ def _train(args):
         dil_tasks=['real','quickdraw','painting','sketch','infograph','clipart']
         num_tasks=len(dil_tasks)
         model.is_dil=True
+    elif args['dataset'] == 'cdm':
+        model.is_dil = True 
+        dil_tasks = reproduced_datasets_v1.split(",")
+        num_tasks = len(dil_tasks)
+        is_reproduced_data = True
+    elif args['dataset'] == 'eti':
+        model.is_dil = True 
+        dil_tasks = reproduced_datasets_v2.split(",")
+        num_tasks = len(dil_tasks)
+        is_reproduced_data = True
+    elif args['dataset'] == 'trc':
+        model.is_dil = True 
+        dil_tasks = reproduced_datasets_v3.split(",")
+        num_tasks = len(dil_tasks)
+        is_reproduced_data = True
     else:
         #cil datasets
         model.is_dil=False
@@ -89,27 +109,36 @@ def _train(args):
     for task in range(num_tasks):
         if model.is_dil:
             #reset the data manager to the next domain
-            data_manager = DataManager(
-                args["dataset"]+'_'+dil_tasks[task],
-                args["shuffle"],
-                args["seed"],
-                args["init_cls"],
-                args["increment"],
-                use_input_norm=args["use_input_norm"]
-            )
-            model._cur_task=-1
-            model._known_classes = 0
-            model._classes_seen_so_far = 0
-        if classes_df is None:
-            classes_df=pd.DataFrame()
-            classes_df['init']=-1*np.ones(data_manager._test_data.shape[0])
+            if not is_reproduced_data:
+                data_manager = DataManager(
+                    args["dataset"]+'_'+dil_tasks[task],
+                    args["shuffle"],
+                    args["seed"],
+                    args["init_cls"],
+                    args["increment"],
+                    use_input_norm=args["use_input_norm"]
+                )
+                model._cur_task=-1
+                model._known_classes = 0
+                model._classes_seen_so_far = 0
+            else:
+                model._cur_task=-1
+                model._known_classes = 0
+                model._classes_seen_so_far = 0
+                data_manager = DILDataManager(
+                    args,
+                    dil_tasks[task],
+                    args["shuffle"],
+                    args["seed"],
+                    args["init_cls"],
+                    args["increment"],
+                    use_input_norm=args["use_input_norm"]
+                )
+       
         model.incremental_train(data_manager)
         acc_total,acc_grouped,predicted_classes,true_classes = model.eval_task()
         col1='pred_task_'+str(task)
         col2='true_task_'+str(task)
-        if args['do_not_save']==False:
-            classes_df[col1]=np.pad(predicted_classes,(0,data_manager._test_data.shape[0]-len(predicted_classes)),'constant',constant_values=(-1,-1))
-            classes_df[col2]=np.pad(true_classes,(0,data_manager._test_data.shape[0]-len(predicted_classes)),'constant',constant_values=(-1,-1))
         model.after_task()
         
         acc_curve["top1_total"].append(acc_total)
@@ -135,7 +164,8 @@ def save_results(args,top1_total,ave_acc,model,classes_df):
 
     if not os.path.exists('./results/class_preds/'):
         os.makedirs('./results/class_preds/')
-    classes_df.to_csv('./results/class_preds/'+args['dataset']+'_class_preds_publish_'+str(args['ID'])+'.csv')
+    if classes_df is not None:
+        classes_df.to_csv('./results/class_preds/'+args['dataset']+'_class_preds_publish_'+str(args['ID'])+'.csv')
 
 def _set_device(args):
     device_type = args["device"]
