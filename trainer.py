@@ -110,6 +110,9 @@ def _train(args):
         if model.is_dil:
             #reset the data manager to the next domain
             if not is_reproduced_data:
+                model._cur_task=-1
+                model._known_classes = 0
+                model._classes_seen_so_far = 0
                 data_manager = DataManager(
                     args["dataset"]+'_'+dil_tasks[task],
                     args["shuffle"],
@@ -118,9 +121,6 @@ def _train(args):
                     args["increment"],
                     use_input_norm=args["use_input_norm"]
                 )
-                model._cur_task=-1
-                model._known_classes = 0
-                model._classes_seen_so_far = 0
             else:
                 model._cur_task=-1
                 model._known_classes = 0
@@ -135,11 +135,11 @@ def _train(args):
                     use_input_norm=args["use_input_norm"]
                 )
        
-        model.incremental_train(data_manager)
+        model.incremental_train(data_manager, data_manager_index=task)
         acc_total,acc_grouped,predicted_classes,true_classes = model.eval_task()
         col1='pred_task_'+str(task)
         col2='true_task_'+str(task)
-        model.after_task()
+        model.after_task(task)
         
         acc_curve["top1_total"].append(acc_total)
         acc_curve["ave_acc"].append(np.round(np.mean(list(acc_grouped.values())),2))
@@ -151,6 +151,7 @@ def _train(args):
         logging.info("Top1 curve: {}".format(acc_curve["top1_total"]))
         
     logging.info('Finishing run')
+    torch.save(model._network.state_dict(), f"checkpoint_{args['dataset']}.pt")
     logging.info('')
     return acc_curve["ave_acc"]
 

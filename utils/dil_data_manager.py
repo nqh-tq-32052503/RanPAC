@@ -46,10 +46,16 @@ class DummyDataset(Dataset):
 
     def __getitem__(self, idx):
         data = self.core_dataset[idx]
-        if len(data) == 3:
+        if len(data) == 2:
+            img, target = data
+        elif len(data) == 3:
             img, target, not_aug_img = data
-        else:
+        elif len(data) == 4:
             img, target, not_aug_img, _ = data 
+        else:
+            print("[ERROR], len(data)=", len(data))
         if img.shape[2] != 224:
             img = self.default_transform(img)
+        if img.shape[0] != 3:
+            img = img.expand(3, -1, -1)
         return idx, img, target
