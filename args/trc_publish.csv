@@ -4,7 +4,7 @@ ID,dataset,shuffle,init_cls,increment,model_name,convnet_type,device,seed,batch_
 4,domainnet,True,345,345,ncm,pretrained_vit_b16_224,0,1993,128,0,0.0,0.0,0.0005,0.0,True,10000,False
 5,domainnet,True,345,345,adapter,pretrained_vit_b16_224_adapter,0,1993,48,20,0.01,0.01,0.0005,0.0,False,-1,False
 6,domainnet,True,345,345,adapter,pretrained_vit_b16_224_adapter,0,1993,48,20,0.01,0.01,0.0005,0.0,True,0,False
-7,cdm,True,345,345,adapter,pretrained_vit_b16_224_adapter,0,1993,48,10,0.01,0.01,0.0005,0.0,True,10000,False
+7,trc,True,345,345,adapter,pretrained_vit_b16_224_adapter,0,1993,32,10,0.01,0.01,0.0005,0.0,True,10000,False
 8,domainnet,True,345,345,ncm,pretrained_resnet50,0,1993,128,0,0.0,0.0,0.0005,0.0,False,-1,True
 9,domainnet,True,345,345,ncm,pretrained_resnet50,0,1993,128,0,0.0,0.0,0.0005,0.0,True,0,True
 10,domainnet,True,345,345,ncm,pretrained_resnet50,0,1993,128,0,0.0,0.0,0.0005,0.0,True,10000,True
