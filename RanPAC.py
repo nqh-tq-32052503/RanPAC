@@ -50,13 +50,19 @@ class BaseLearner(object):
     def _compute_accuracy(self, model, loader):
         model.eval()
         correct, total = 0, 0
-        for i, (_, inputs, targets) in enumerate(loader):
+        num_choose = 5
+        count = 0
+        for test_batch in tqdm(loader):
+            _, inputs, targets = test_batch
             inputs = inputs.to(self._device)
             with torch.no_grad():
                 outputs = model(inputs)["logits"]
             predicts = torch.max(outputs, dim=1)[1]
             correct += (predicts.cpu() == targets).sum()
             total += len(targets)
+            count += 1
+            # if count > num_choose:
+            #     break
 
         return np.around(tensor2numpy(correct) * 100 / total, decimals=2)
 
@@ -85,8 +91,11 @@ class Learner(BaseLearner):
             self._batch_size= args["batch_size"]
         self.args=args
 
-    def after_task(self):
+    def after_task(self, task):
         self._known_classes = self._classes_seen_so_far
+        self._network.save_fc(task)
+        
+        
     
     def replace_fc(self,trainloader):
         self._network = self._network.eval()
@@ -101,24 +110,32 @@ class Learner(BaseLearner):
 
         Features_f = []
         label_list = []
+        print("[INFO] Replace FC...")
         with torch.no_grad():
-            for i, batch in enumerate(trainloader):
-                (_,data,label)=batch
+            num_choose = 5
+            count = 0
+            for batch in tqdm(trainloader):
+                _, data, label = batch
                 data=data.cuda()
                 label=label.cuda()
                 embedding = self._network.convnet(data)
                 Features_f.append(embedding.cpu())
                 label_list.append(label.cpu())
+                count += 1
+                # if count > num_choose:
+                #     break
         Features_f = torch.cat(Features_f, dim=0)
         label_list = torch.cat(label_list, dim=0)
         
         Y=target2onehot(label_list,self.total_classnum)
         if self.args['use_RP']:
+            print("[INFO] Optimize Ridge")
             #print('Number of pre-trained feature dimensions = ',Features_f.shape[-1])
             if self.args['M']>0:
                 Features_h=torch.nn.functional.relu(Features_f@ self._network.fc.W_rand.cpu())
             else:
                 Features_h=Features_f
+            print("[INFO] Artifacts: Q: ", self.Q.shape, "Features: ", Features_h.shape, "Y: ", Y.shape)
             self.Q=self.Q+Features_h.T @ Y 
             self.G=self.G+Features_h.T @ Features_h
             ridge=self.optimise_ridge_parameter(Features_h,Y)
@@ -136,21 +153,26 @@ class Learner(BaseLearner):
                     self._network.fc.weight.data[class_index]=class_prototype #for cil, only new classes get updated
 
     def optimise_ridge_parameter(self,Features,Y):
+        device = torch.device("cuda")
+        Y = Y.to(device)
+        Features = Features.to(device)
         ridges=10.0**np.arange(-8,9)
         num_val_samples=int(Features.shape[0]*0.8)
         losses=[]
         Q_val=Features[0:num_val_samples,:].T @ Y[0:num_val_samples,:]
         G_val=Features[0:num_val_samples,:].T @ Features[0:num_val_samples,:]
-        for ridge in ridges:
-            Wo=torch.linalg.solve(G_val+ridge*torch.eye(G_val.size(dim=0)),Q_val).T #better nmerical stability than .inv
+        
+        for ridge in tqdm(ridges):
+            Wo=torch.linalg.solve(G_val+ridge*torch.eye(G_val.size(dim=0), device=device),Q_val).T #better nmerical stability than .inv
             Y_train_pred=Features[num_val_samples::,:]@Wo.T
-            losses.append(F.mse_loss(Y_train_pred,Y[num_val_samples::,:]))
+            losses.append(F.mse_loss(Y_train_pred,Y[num_val_samples::,:]).detach().cpu())
         ridge=ridges[np.argmin(np.array(losses))]
         logging.info("Optimal lambda: "+str(ridge))
         return ridge
     
-    def incremental_train(self, data_manager):
+    def incremental_train(self, data_manager, data_manager_index=0):
         self.total_classnum = data_manager.get_total_classnum()
+        print("Number of classes: ", self.total_classnum)
         self._cur_task += 1
         self._classes_seen_so_far = self._known_classes + data_manager.get_task_size(self._cur_task)
         if self.args['use_RP']:
@@ -234,8 +256,8 @@ class Learner(BaseLearner):
                     logging.info("Starting PETL training on first task using "+self.args["model_name"]+" method")
                     self._init_train(train_loader, test_loader, optimizer, scheduler)
                     self.freeze_backbone()
-                if self.args['use_RP'] and self.dil_init==False:
-                    self.setup_RP()
+            if self.args['use_RP']:
+                self.setup_RP()
             if self.is_dil and self.dil_init==False:
                 self.dil_init=True
                 self._network.fc.weight.data.fill_(0.0)
@@ -257,6 +279,7 @@ class Learner(BaseLearner):
             #no RP, only decorrelation
             M=self._network.fc.in_features #this M is L in the paper
         self.Q=torch.zeros(M,self.total_classnum)
+        print("[INFO] Q: ", self.Q.shape)
         self.G=torch.zeros(M,M)
 
     def _init_train(self, train_loader, test_loader, optimizer, scheduler):
@@ -265,7 +288,10 @@ class Learner(BaseLearner):
             self._network.train()
             losses = 0.0
             correct, total = 0, 0
-            for i, (_, inputs, targets) in enumerate(train_loader):
+            num_choose = 5
+            count = 0
+            for train_batch in tqdm(train_loader):
+                _, inputs, targets = train_batch
                 inputs, targets = inputs.to(self._device), targets.to(self._device)
                 logits = self._network(inputs)["logits"]
                 loss = F.cross_entropy(logits, targets)
@@ -276,6 +302,9 @@ class Learner(BaseLearner):
                 _, preds = torch.max(logits, dim=1)
                 correct += preds.eq(targets.expand_as(preds)).cpu().sum()
                 total += len(targets)
+                count += 1
+                # if count > num_choose:
+                #     break
             scheduler.step()
             train_acc = np.around(tensor2numpy(correct) * 100 / total, decimals=2)
             test_acc = self._compute_accuracy(self._network, test_loader)

@@ -4,6 +4,7 @@ import math
 import torch
 from torch import nn
 import timm
+import os
 from torch.nn import functional as F
 
 class CosineLinear(nn.Module):
@@ -153,6 +154,9 @@ class BaseNet(nn.Module):
         super(BaseNet, self).__init__()
         self.convnet = get_convnet(args, pretrained)
         self.fc = None
+        self.fc_folder = f"fc_{args['dataset']}/"
+        if not os.path.exists(self.fc_folder):
+            os.mkdir(self.fc_folder)
 
     @property
     def feature_dim(self):
@@ -174,13 +178,17 @@ class BaseNet(nn.Module):
 
     def update_fc(self, nb_classes):
         pass
-
+    
+    def save_fc(self, cur_task):
+        torch.save(self.fc.state_dict(), os.path.join(self.fc_folder, f"fc_{cur_task}.pt"))
+        
 class ResNetCosineIncrementalNet(BaseNet):
     def __init__(self, args, pretrained):
         super().__init__(args, pretrained)
 
     def update_fc(self, nb_classes):
         fc = CosineLinear(self.feature_dim, nb_classes).cuda()
+        print("[INFO] Update FC is calling...; nb_classes=", nb_classes, "fc: ", fc)
         if self.fc is not None:
             nb_output = self.fc.out_features
             weight = copy.deepcopy(self.fc.weight.data)
